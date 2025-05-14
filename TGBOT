@@ -1,0 +1,107 @@
+import telebot
+from telebot import types
+import random
+
+API_TOKEN = '7091331379:AAFfmOAkP3eqXSMzz94kkKKGHS-pnn1zrJ0'
+bot = telebot.TeleBot(API_TOKEN)
+
+age = 0;
+name = '';
+surname = '';
+# Структура хранения информации о пользователях
+user_data = {}
+
+# Определение локаций и описаний
+locations = {
+    "forest": "Вы находитесь в лесу. Вы можете пройти в 'castle' или 'river'.",
+    "castle": "Вы у замка. Можно зайти в 'dungeon' или вернуться в 'forest'.",
+    "river": "Вы у реки. Можно пройти к 'cave' или вернуться в 'forest'.",
+    "dungeon": "Вы в подземелье. Можно выйти в 'castle' или посетить 'treasure_room'.",
+    "cave": "Вы в пещере. Можно пройти в 'mountain' или вернуться к 'river'.",
+    "treasure_room": "Вы нашли сокровища! Игра окончена. Вернуться в 'castle'.",
+    "mountain": "Вы на горе. Можно спуститься в 'cave' или исследовать 'cloud'.",
+    "cloud": "Вы на облаке. Игра окончена, вы нашли новое место! Вернуться в 'mountain'."
+}
+
+# Команда /start
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.send_message(message.from_user.id, "Твоё имя, воин?");
+    bot.register_next_step_handler(message, get_name); #следующий шаг – функция get_name
+
+def get_name(message): #получаем фамилию
+    global name;
+    name = message.text;
+    bot.send_message(message.from_user.id, 'А фамилия?');
+    bot.register_next_step_handler(message, get_surname);
+
+def get_surname(message):
+    global surname;
+    surname = message.text;
+    bot.send_message(message.from_user.id, 'Сколько тебе лет отроду?');
+    bot.register_next_step_handler(message, get_age);
+
+def get_age(message):
+    global age;
+    while age == 0: #проверяем что возраст изменился
+        try:
+            age = int(message.text) #проверяем, что возраст введен корректно
+        except Exception:
+            bot.send_message(message.from_user.id, 'Цифрами, пожалуйста');
+            break
+    keyboard = types.InlineKeyboardMarkup() #наша клавиатур
+    key_yes = types.InlineKeyboardButton('Да', callback_data='yes'); #кнопка «Да»
+    keyboard.add(key_yes); #добавляем кнопку в клавиатуру
+    key_no= types.InlineKeyboardButton('Нет', callback_data='no');
+    keyboard.add(key_no);
+    que = 'Тебе '+str(age)+' лет, тебя зовут '+name+' '+surname+'?'
+    bot.send_message(message.chat.id, text=que, reply_markup=keyboard)
+    
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(call):
+    # Обработка нажатий на инлайн-кнопки
+    if call.data == 'yes':
+        bot.send_message(call.message.chat.id, "Я запомню тебя. Напиши /quest, чтобы начать")
+    elif call.data == 'no':
+        bot.send_message(call.message.chat.id, "Давай по новой /start")
+
+# Команда /help
+@bot.message_handler(commands=['help'])
+def send_help(message):
+    bot.reply_to(message, "Команды:\n/start - начать\n/help - помощь\n/quest - начать квест")
+
+# Команда /quest
+@bot.message_handler(commands=['quest'])
+def start_quest(message):
+    user_id = message.from_user.id
+    user_data[user_id] = {"location": "forest"}  # Начальная локация
+    bot.send_message(user_id, text=locations[user_data[user_id]["location"]], reply_markup=get_location_markup())
+
+# Функция для создания кнопок
+def get_location_markup():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    buttons = ["forest", "castle", "river", "dungeon", "cave", "treasure_room", "mountain", "cloud"]
+    markup.add(*buttons)  # Добавляем все кнопки
+    return markup
+
+# Обработка сообщений
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    user_id = message.from_user.id
+
+    if user_id not in user_data:
+        bot.reply_to(message, "Сначала введите /start, чтобы начать игру.")
+        return
+
+    current_location = user_data[user_id]["location"]
+    user_choice = message.text
+
+    # Проверка, если сообщение соответствует одной из локаций
+    if user_choice in locations:
+        user_data[user_id]["location"] = user_choice
+        bot.send_message(user_id, text=locations[user_data[user_id]["location"]], reply_markup=get_location_markup())
+    else:
+        bot.reply_to(message, "Неверный выбор. Пожалуйста, выберите доступное направление с помощью кнопок.")
+
+# Запуск бота
+bot.polling()
