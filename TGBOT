@@ -2,7 +2,7 @@ import telebot
 from telebot import types
 import random
 
-API_TOKEN = '7091331379:AAFfmOAkP3eqXSMzz94kkKKGHS-pnn1zrJ0'  # Замените на ваш токен Telegram API
+API_TOKEN = '7091331379:AAFfmOAkP3eqXSMzz94kkKKGHS-pnn1zrJ0'
 bot = telebot.TeleBot(API_TOKEN)
 
 age = 0;
