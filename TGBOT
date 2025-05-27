@@ -23,6 +23,24 @@ locations = {
     "cloud": "Вы на облаке. Игра окончена, вы нашли новое место! Вернуться в 'mountain'."
 }
 
+transitions = {
+    "forest": ["castle", "river"],
+    "castle": ["dungeon", "forest"],
+    "river": ["cave", "forest"],
+    "dungeon": ["castle", "treasure_room"],
+    "cave": ["mountain", "river"],
+    "treasure_room": ["castle"],
+    "mountain": ["cave", "cloud"],
+    "cloud": ["mountain"]
+}
+
+boss_stats = {
+    "treasure_room": {"hp": 30, "name": "Хранитель сокровищ"},
+    "cloud": {"hp": 50, "name": "Дух облака"}
+}
+
+player_stats = {}
+
 # Команда /start
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -56,6 +74,7 @@ def get_age(message):
     keyboard.add(key_no);
     que = 'Тебе '+str(age)+' лет, тебя зовут '+name+' '+surname+'?'
     bot.send_message(message.chat.id, text=que, reply_markup=keyboard)
+    age = 0;
     
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
@@ -75,13 +94,14 @@ def send_help(message):
 def start_quest(message):
     user_id = message.from_user.id
     user_data[user_id] = {"location": "forest"}  # Начальная локация
-    bot.send_message(user_id, text=locations[user_data[user_id]["location"]], reply_markup=get_location_markup())
+    bot.send_message(user_id, text=locations[user_data[user_id]["location"]], reply_markup=get_location_markup(user_id))
 
 # Функция для создания кнопок
-def get_location_markup():
+def get_location_markup(user_id):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    buttons = ["forest", "castle", "river", "dungeon", "cave", "treasure_room", "mountain", "cloud"]
-    markup.add(*buttons)  # Добавляем все кнопки
+    current_location = user_data[user_id]["location"]
+    buttons = transitions.get(current_location, [])
+    markup.add(*buttons)
     return markup
 
 # Обработка сообщений
@@ -92,16 +112,95 @@ def handle_message(message):
     if user_id not in user_data:
         bot.reply_to(message, "Сначала введите /start, чтобы начать игру.")
         return
+    
+    if "location" not in user_data[user_id]:
+        user_data[user_id]["location"] = "forest"  # или другой старт
+    # Проверяем, есть ли ключ "state" - игра в бою или нет
+    if "state" not in user_data[user_id]:
+        user_data[user_id]["state"] = None
+
+    # Если сейчас идет драка, обработать бой
+    if user_data[user_id]["state"] is not None:
+        handle_fight(message)
+        return
 
     current_location = user_data[user_id]["location"]
-    user_choice = message.text
+    user_choice = message.text.lower()
 
-    # Проверка, если сообщение соответствует одной из локаций
-    if user_choice in locations:
+    if user_choice in transitions.get(current_location, []):
         user_data[user_id]["location"] = user_choice
-        bot.send_message(user_id, text=locations[user_data[user_id]["location"]], reply_markup=get_location_markup())
-    else:
-        bot.reply_to(message, "Неверный выбор. Пожалуйста, выберите доступное направление с помощью кнопок.")
+        text = locations[user_choice]
 
+        # Если это финальная локация с боем, запускаем драку
+        if user_choice in boss_stats:
+            user_data[user_id]["state"] = f"fight_{user_choice}"
+            user_data[user_id]["boss_hp"] = boss_stats[user_choice]["hp"]
+            user_data[user_id]["player_hp"] = 50  
+            bot.send_message(user_id, f"Ты же тот самый {boss_stats[user_choice]['name']}! Я сделаю из твоей головы новый трофей!")
+            send_fight_options(user_id)
+        else:
+            bot.send_message(user_id, text, reply_markup=get_location_markup(user_id))
+    else:
+        bot.send_message(user_id, f"Нельзя пойти туда из {current_location}. Попробуйте ещё раз.")
+        
+def handle_fight(message):
+    user_id = message.from_user.id
+    action = message.text.lower()
+
+    if action not in ["удар", "защита", "спецприём"]:
+        bot.send_message(user_id, "Что делаем: Удар, Защита или Спецприём?")
+        send_fight_options(user_id)
+        return
+
+    state = user_data[user_id]["state"]
+    boss_hp = user_data[user_id]["boss_hp"]
+    player_hp = user_data[user_id]["player_hp"]
+    boss_name = boss_stats[state.replace("fight_", "")]["name"]
+
+    # Простая логика боя
+    enemy_action = random.choice(["удар", "защита", "спецприём"])
+
+    result_message = f"Я выбираю: {action.capitalize()}\n{boss_name} выбрал: {enemy_action.capitalize()}.\n"
+
+    # Простая механика урона: если ваши действия побеждают
+    if action == enemy_action:
+        result_message += "Ничья! Он знает мои действия?"
+    elif (action == "удар" and enemy_action == "спецприём") or \
+         (action == "защита" and enemy_action == "удар") or \
+         (action == "спецприём" and enemy_action == "защиту"):
+        result_message += "Я попал в слабое место!"
+        user_data[user_id]["boss_hp"] -= 10
+    else:
+        result_message += f"{boss_name} нанёс мне увечия"
+        user_data[user_id]["player_hp"] -= 10
+
+    bot.send_message(user_id, result_message)
+
+    # Проверка, победа или поражение
+    if user_data[user_id]["boss_hp"] <= 0:
+        bot.send_message(user_id, f"{boss_name} повержен!")
+        # Выход из боя
+        user_data[user_id]["state"] = None
+        # Можно показать следующую локацию или завершить
+        location = user_data[user_id]["location"]
+        bot.send_message(user_id, locations[location], reply_markup=get_location_markup(user_id))
+    elif user_data[user_id]["player_hp"] <= 0:
+        bot.send_message(user_id, "Не все герои бессмертны. Игра окончена.")
+        user_data[user_id]["state"] = None
+        # Предложить начать заново
+        bot.send_message(user_id, "Напишите /start или /quest для начала заново.", reply_markup=types.ReplyKeyboardRemove())
+    else:
+        # Игра продолжается, просим выбрать действие снова
+        send_fight_options(user_id)
+        
+def send_fight_options(user_id):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=3)
+    buttons = [
+        types.KeyboardButton("Удар"),
+        types.KeyboardButton("Защита"),
+        types.KeyboardButton("Спецприём")
+    ]
+    markup.add(*buttons)
+    bot.send_message(user_id, "Выбирай:", reply_markup=markup)
 # Запуск бота
 bot.polling()
